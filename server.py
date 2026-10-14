@@ -290,25 +290,48 @@ def get_current_story():
     for d in chapter["dialogues"]:
         spk = d["speaker"]
         spk = spk.replace("【亲哥哥】", f"【哥哥 · {brother_name}】")
-        spk = spk.replace("【暗恋者】", f"【暗恋者 · {crush_name}】")
-        txt = d["text"].replace("【职业身份】", career_name)
+        spk = spk.replace("【暗恋者】", crush_name)
+        txt = d["text"].replace("【职业身份】", career_name).replace("【暗恋者】", crush_name)
         processed_dialogues.append({"speaker": spk, "text": txt})
+
+    processed_choices = []
+    for c in chapter.get("choices", []):
+        c_copy = dict(c)
+        c_copy["text"] = c_copy["text"].replace("【暗恋者】", crush_name).replace("暗恋者", crush_name).replace("【亲哥哥】", f"哥哥 {brother_name}")
+        if "response" in c_copy:
+            c_copy["response"] = c_copy["response"].replace("【暗恋者】", crush_name).replace("暗恋者", crush_name).replace("【亲哥哥】", f"哥哥 {brother_name}")
+        processed_choices.append(c_copy)
 
     # 检查是否满足上位剧情条件
     has_dating = len(game.state["dating_list"]) > 0
     crush_aff = game.state["characters"][game.state["crush_id"]]["affinity"]
     can_trigger_usurper = (has_dating and crush_aff >= 30 and not game.state["characters"][game.state["crush_id"]]["is_dating"])
 
+    processed_usurper = None
+    if can_trigger_usurper and USURPER_EVENT:
+        processed_usurper = {
+            "title": USURPER_EVENT["title"].replace("暗恋者", crush_name),
+            "desc": USURPER_EVENT["desc"].replace("【暗恋者】", crush_name).replace("暗恋者", crush_name),
+            "choices": [
+                {
+                    "id": uc["id"],
+                    "text": uc["text"].replace("【暗恋者强势上位】", f"【握紧{crush_name}的手】").replace("【暗恋者】", crush_name).replace("暗恋者", crush_name)
+                }
+                for uc in USURPER_EVENT.get("choices", [])
+            ]
+        }
+
     return {
         "chapter": {
             "id": chapter["id"],
-            "title": chapter["title"],
-            "desc": chapter["desc"],
+            "time_badge": chapter.get("time_badge", ""),
+            "title": chapter["title"].replace("【暗恋者】", crush_name),
+            "desc": chapter["desc"].replace("【暗恋者】", crush_name),
             "dialogues": processed_dialogues,
-            "choices": chapter.get("choices", [])
+            "choices": processed_choices
         },
         "can_trigger_usurper": can_trigger_usurper,
-        "usurper_event": USURPER_EVENT if can_trigger_usurper else None,
+        "usurper_event": processed_usurper,
         "is_total_blackened": game.state["is_total_blackened"],
         "total_collapse_event": TOTAL_COLLAPSE_EVENT if game.state["is_total_blackened"] else None
     }

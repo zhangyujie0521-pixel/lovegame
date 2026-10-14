@@ -160,7 +160,7 @@ async function submitGenesis() {
         document.getElementById("genesis-modal").style.display = "none";
         btn.textContent = "启动命运轮盘 (从0开始)";
         btn.disabled = false;
-        alert(`【命运揭晓】\n👑 你的亲哥哥是：${gameState.brother_name}！\n🤫 12位队友中，有一位暗恋者已埋下心动宿命！\n其余11位成员初始为 0 好感，请通过剧情展开攻略！`);
+        alert(`【命运启动】\n👑 你的亲哥哥是：${gameState.brother_name}！\n🤫 其余 12 位队友初始态度各异，有人表面冷淡，有人深藏旧情……\n随着单向剧情推进，你能感知到谁才是真正心系于你的少年吗？`);
         renderAll();
         return;
     }
@@ -177,7 +177,7 @@ async function submitGenesis() {
             document.getElementById("genesis-modal").style.display = "none";
             btn.textContent = "启动命运轮盘 (从0开始)";
             btn.disabled = false;
-            alert(`【命运揭晓】\n👑 你的亲哥哥是：${gameState.brother_name}！\n🤫 12位队友中，有一位暗恋者已埋下心动宿命！\n其余11位成员初始为 0 好感，请通过剧情展开攻略！`);
+            alert(`【命运启动】\n👑 你的亲哥哥是：${gameState.brother_name}！\n🤫 其余 12 位队友初始态度各异，有人表面冷淡，有人深藏旧情……\n随着单向剧情推进，你能感知到谁才是真正心系于你的少年吗？`);
             renderAll();
         }
     } catch (e) {
@@ -191,7 +191,7 @@ async function submitGenesis() {
     }
 }
 
-// ==================== 13人花名册 (Roster) ====================
+// ==================== 13人花名册 (Roster: 仅哥哥明示，其余全为队友，暗恋者全隐藏) ====================
 function renderRoster() {
     const list = document.getElementById("roster-list");
     if (!list || !gameState || !gameState.members) return;
@@ -199,24 +199,20 @@ function renderRoster() {
     list.innerHTML = "";
     gameState.members.forEach(m => {
         const isBrother = (m.id === gameState.brother_id);
-        const isCrush = (m.id === gameState.crush_id);
         const isDating = m.is_dating;
 
         let roleTagClass = "tag-member";
-        let roleText = "队友 (0好感)";
+        let roleText = "队友";
         if (isBrother) {
             roleTagClass = "tag-brother";
-            roleText = "亲哥哥 (守护者)";
+            roleText = "亲哥哥 (唯一明示)";
         } else if (isDating) {
             roleTagClass = "tag-dating";
             roleText = "秘密地下恋人";
-        } else if (isCrush) {
-            roleTagClass = "tag-crush";
-            roleText = "隐藏暗恋者";
         }
 
         const card = document.createElement("div");
-        card.className = `character-card ${isBrother ? 'is-brother' : ''} ${isCrush ? 'is-crush' : ''} ${isDating ? 'is-dating' : ''}`;
+        card.className = `character-card ${isBrother ? 'is-brother' : ''} ${isDating ? 'is-dating' : ''}`;
         card.innerHTML = `
             <div class="card-avatar-box">
                 <div class="card-avatar" style="background:${m.avatar_color}">
@@ -235,12 +231,11 @@ function renderRoster() {
                 </div>
                 <div style="font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;margin-bottom:6px;">
                     <span>好感羁绊: <b style="color:var(--accent-gold);">${m.affinity}/100</b></span>
-                    <span>${m.is_blackened ? '💥 已黑化' : (m.affinity >= 60 ? '🔥 极度暧昧' : (m.affinity >= 20 ? '💓 心动萌芽' : '❄️ 熟人'))}</span>
+                    <span>${m.is_blackened ? '💥 已黑化' : (m.affinity >= 60 ? '🔥 极度暧昧' : (m.affinity >= 20 ? '💓 心动萌芽' : (isBrother ? '🛡️ 亲情锁死' : '❄️ 普通相处')))}</span>
                 </div>
                 <div class="card-actions">
-                    <button class="btn-mini" onclick="openPrivateChatWith('${m.id}')">💬 私聊</button>
-                    ${!isBrother && !isDating ? `<button class="btn-mini" style="border-color:var(--accent-pink)" onclick="startDatingQuick('${m.id}')">💖 确立秘恋</button>` : ''}
-                    ${isBrother ? `<span style="font-size:10px;color:#3498db;margin-left:4px;">门禁监视中</span>` : ''}
+                    <button class="btn-mini" onclick="openPrivateChatWith('${m.id}')">💬 发私信</button>
+                    ${isBrother ? `<span style="font-size:10px;color:#3498db;margin-left:4px;">全天候门禁监视中</span>` : `<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">推进主线剧情解锁心动</span>`}
                 </div>
             </div>
         `;
@@ -336,8 +331,6 @@ async function loadGroupChat() {
         let roleTag = "";
         if (m.sender_id === gameState.brother_id) {
             roleTag = `<span class="msg-tag-brother">亲哥</span>`;
-        } else if (m.sender_id === gameState.crush_id) {
-            roleTag = `<span class="msg-tag-crush">暗恋者</span>`;
         } else if (gameState.dating_list && gameState.dating_list.includes(m.sender_id)) {
             roleTag = `<span class="msg-tag-dating">秘密男友</span>`;
         }
@@ -575,22 +568,22 @@ async function loadCurrentStory() {
         timeBadgeEl.textContent = ch.time_badge || `📅 巡演日程 · 第 ${sIdx + 1} 阶段`;
     }
 
-    document.getElementById("story-chapter-title").textContent = ch.title;
-    document.getElementById("story-chapter-desc").textContent = ch.desc;
-
     // 更新舞台立绘区（根据章节核心人物渲染）
     const brotherName = gameState ? gameState.brother_name : "顾寒沉";
     const crushName = gameState ? gameState.crush_name : "陆时衍";
     const careerName = (gameState && gameState.career) ? gameState.career.name : "化妆造型师";
 
+    document.getElementById("story-chapter-title").textContent = (ch.title || "").replace(/【暗恋者】/g, crushName).replace(/暗恋者的/g, `${crushName}的`).replace(/暗恋者/g, crushName);
+    document.getElementById("story-chapter-desc").textContent = (ch.desc || "").replace(/【暗恋者】/g, crushName).replace(/暗恋者/g, crushName);
+
     const speakerTag = document.getElementById("stage-speaker-tag");
     const halo = document.querySelector(".character-glow-halo");
     if (speakerTag && halo) {
         if (sIdx === 0) {
-            speakerTag.textContent = `练习生旧忆 · ${brotherName}`;
+            speakerTag.textContent = `${brotherName}`;
             halo.textContent = brotherName.charAt(0);
         } else if (sIdx === 1 || sIdx === 2 || sIdx === 6) {
-            speakerTag.textContent = `心跳对峙 · ${crushName}`;
+            speakerTag.textContent = `${crushName}`;
             halo.textContent = crushName.charAt(0);
         } else if (sIdx === 7) {
             speakerTag.textContent = `🚨 全员黑化核爆`;
@@ -605,8 +598,8 @@ async function loadCurrentStory() {
     vp.innerHTML = "";
 
     ch.dialogues.forEach(d => {
-        let spk = d.speaker.replace("【亲哥哥】", `【哥哥 · ${brotherName}】`).replace("【暗恋者】", `【暗恋者 · ${crushName}】`);
-        let txt = d.text.replace("【职业身份】", careerName);
+        let spk = d.speaker.replace("【亲哥哥】", `【哥哥 · ${brotherName}】`).replace("【暗恋者】", crushName).replace("暗恋者", crushName);
+        let txt = d.text.replace("【职业身份】", careerName).replace("【暗恋者】", crushName).replace("暗恋者", crushName);
         const div = document.createElement("div");
         div.className = "story-bubble";
         div.innerHTML = `
@@ -627,7 +620,7 @@ async function loadCurrentStory() {
         endBox.style = "text-align:center; padding:16px; background:rgba(255,255,255,0.05); border-radius:14px; border:1px solid var(--accent-gold); margin-top:8px;";
         endBox.innerHTML = `
             <h3 style="font-size:14px; color:var(--accent-gold); margin-bottom:6px;">🏆 当前命运周目已走向终章</h3>
-            <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">时间长河奔流不息，所有的心动与遗憾皆成定局。想体验全然不同的亲哥与暗恋者命运羁绊？</p>
+            <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">时间长河奔流不息，所有的心动与遗憾皆成定局。想体验全然不同的宿命羁绊？</p>
             <button class="btn-primary-block" style="padding:8px 16px; font-size:12px;" onclick="showGenesisModal()">🎲 重启命运轮盘 (开启下一周目)</button>
         `;
         choicesContainer.appendChild(endBox);
@@ -637,14 +630,17 @@ async function loadCurrentStory() {
     if (canTriggerUsurper && usurperEvent) {
         const alertBox = document.createElement("div");
         alertBox.style = "background:rgba(231,76,60,0.2);border:1px solid #e74c3c;border-radius:12px;padding:10px;margin-bottom:8px;font-size:12px;";
-        alertBox.innerHTML = `<b>⚡【唯一突发时机 · 错过永不再现】${usurperEvent.title}</b><p style="margin-top:4px;">${usurperEvent.desc}</p>`;
+        const uTitle = (usurperEvent.title || "").replace(/暗恋者/g, crushName);
+        const uDesc = (usurperEvent.desc || "").replace(/【暗恋者】/g, crushName).replace(/暗恋者/g, crushName);
+        alertBox.innerHTML = `<b>⚡【唯一突发时机 · 错过永不再现】${uTitle}</b><p style="margin-top:4px;">${uDesc}</p>`;
         choicesContainer.appendChild(alertBox);
 
         usurperEvent.choices.forEach(c => {
             const btn = document.createElement("button");
             btn.className = "choice-btn";
             btn.style.borderColor = "#e74c3c";
-            btn.innerHTML = `<span>${c.text}</span> <span>⏳</span>`;
+            const cText = c.text.replace(/【暗恋者强势上位】/g, `【握紧${crushName}的手】`).replace(/【暗恋者】/g, crushName).replace(/暗恋者/g, crushName);
+            btn.innerHTML = `<span>${cText}</span> <span>⏳</span>`;
             btn.onclick = () => submitUsurperChoice(c.id);
             choicesContainer.appendChild(btn);
         });
@@ -654,13 +650,17 @@ async function loadCurrentStory() {
     (ch.choices || []).forEach((c, idx) => {
         const btn = document.createElement("button");
         btn.className = "choice-btn";
-        btn.innerHTML = `<span>${c.text}</span> <span>⏳ 决断</span>`;
+        const cText = c.text.replace(/【暗恋者】/g, crushName).replace(/暗恋者/g, crushName).replace(/【亲哥哥】/g, `哥哥 · ${brotherName}`);
+        btn.innerHTML = `<span>${cText}</span> <span>⏳ 决断</span>`;
         btn.onclick = () => submitStoryChoice(ch.id, idx);
         choicesContainer.appendChild(btn);
     });
 }
 
 async function submitStoryChoice(chapterId, choiceIndex) {
+    const brotherName = gameState ? gameState.brother_name : "顾寒沉";
+    const crushName = gameState ? gameState.crush_name : "陆时衍";
+
     if (isClientMode && window.clientEngine) {
         const ce = window.clientEngine;
         const allStories = window.GAME_DATA.stories;
@@ -668,7 +668,8 @@ async function submitStoryChoice(chapterId, choiceIndex) {
         if (currentCh && currentCh.choices && currentCh.choices[choiceIndex]) {
             const chosen = currentCh.choices[choiceIndex];
             if (chosen.response) {
-                alert(`⏳【命运时间推进】\n${chosen.response}\n\n（该事件已成既定历史，时间单向流逝，错过的心动将永不复返）`);
+                const respText = chosen.response.replace(/【暗恋者】/g, crushName).replace(/暗恋者/g, crushName).replace(/【亲哥哥】/g, `哥哥 · ${brotherName}`);
+                alert(`⏳【命运时间推进】\n${respText}\n\n（该事件已成既定历史，时间单向流逝，错过的心动将永不复返）`);
             }
             if (chosen.trigger_dating) {
                 ce.startDating(ce.state.crush_id);
@@ -755,17 +756,19 @@ function closeDatePlay() {
 }
 
 async function submitUsurperChoice(actionId) {
+    const crushName = gameState ? gameState.crush_name : "陆时衍";
+
     if (isClientMode && window.clientEngine) {
         const ce = window.clientEngine;
         if (actionId === "accept_usurper") {
             ce.state.dating_list = [ce.state.crush_id];
             ce.state.characters[ce.state.crush_id].is_dating = true;
-            alert("你握紧了他的手。暴雨夜的停车场，旧爱已逝，暗恋者强势上位！");
+            alert(`你握紧了他的手。暴雨轰鸣的地下停车场，旧爱已逝，${crushName}成为了你唯一的秘密恋人！`);
         } else if (actionId === "double_dating") {
             ce.startDating(ce.state.crush_id);
             alert("你两边都不愿放弃！秘密男友名单增加至 " + ce.state.dating_list.length + " 人！");
         } else {
-            alert("你狠心甩开了他的手。暗恋者红着眼眶退后半步，雨水湿透了他的碎发。");
+            alert(`你狠心甩开了他的手。${crushName}红着眼眶退后半步，雨水湿透了他的碎发，眼底最后的光彻底熄灭。`);
         }
         ce.saveState();
         gameState = ce.getSummary();
