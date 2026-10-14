@@ -569,10 +569,11 @@ async function loadCurrentStory() {
 
     if (!ch) return;
 
-    // 更新章节标题与指示器
-    const totalChapters = (window.GAME_DATA && window.GAME_DATA.stories) ? window.GAME_DATA.stories.length : 8;
-    const progressEl = document.getElementById("story-progress-indicator");
-    if (progressEl) progressEl.textContent = `第 ${Math.min(sIdx + 1, totalChapters)}/${totalChapters} 章`;
+    // 更新单向时间戳指示器
+    const timeBadgeEl = document.getElementById("story-time-badge");
+    if (timeBadgeEl) {
+        timeBadgeEl.textContent = ch.time_badge || `📅 巡演日程 · 第 ${sIdx + 1} 阶段`;
+    }
 
     document.getElementById("story-chapter-title").textContent = ch.title;
     document.getElementById("story-chapter-desc").textContent = ch.desc;
@@ -586,16 +587,16 @@ async function loadCurrentStory() {
     const halo = document.querySelector(".character-glow-halo");
     if (speakerTag && halo) {
         if (sIdx === 0) {
-            speakerTag.textContent = `未出道少年 · ${brotherName}`;
+            speakerTag.textContent = `练习生旧忆 · ${brotherName}`;
             halo.textContent = brotherName.charAt(0);
         } else if (sIdx === 1 || sIdx === 2 || sIdx === 6) {
-            speakerTag.textContent = `暗恋者 · ${crushName}`;
+            speakerTag.textContent = `心跳对峙 · ${crushName}`;
             halo.textContent = crushName.charAt(0);
         } else if (sIdx === 7) {
-            speakerTag.textContent = `🚨 全员黑化修罗场`;
+            speakerTag.textContent = `🚨 全员黑化核爆`;
             halo.textContent = "💥";
         } else {
-            speakerTag.textContent = `ASTERIA 顶流舞台`;
+            speakerTag.textContent = `ASTERIA 巡演日`;
             halo.textContent = "✨";
         }
     }
@@ -619,17 +620,31 @@ async function loadCurrentStory() {
     const choicesContainer = document.getElementById("story-choices-container");
     choicesContainer.innerHTML = "";
 
+    // 终章判定
+    const totalChapters = (window.GAME_DATA && window.GAME_DATA.stories) ? window.GAME_DATA.stories.length : 8;
+    if (sIdx >= totalChapters - 1) {
+        const endBox = document.createElement("div");
+        endBox.style = "text-align:center; padding:16px; background:rgba(255,255,255,0.05); border-radius:14px; border:1px solid var(--accent-gold); margin-top:8px;";
+        endBox.innerHTML = `
+            <h3 style="font-size:14px; color:var(--accent-gold); margin-bottom:6px;">🏆 当前命运周目已走向终章</h3>
+            <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">时间长河奔流不息，所有的心动与遗憾皆成定局。想体验全然不同的亲哥与暗恋者命运羁绊？</p>
+            <button class="btn-primary-block" style="padding:8px 16px; font-size:12px;" onclick="showGenesisModal()">🎲 重启命运轮盘 (开启下一周目)</button>
+        `;
+        choicesContainer.appendChild(endBox);
+        return;
+    }
+
     if (canTriggerUsurper && usurperEvent) {
         const alertBox = document.createElement("div");
         alertBox.style = "background:rgba(231,76,60,0.2);border:1px solid #e74c3c;border-radius:12px;padding:10px;margin-bottom:8px;font-size:12px;";
-        alertBox.innerHTML = `<b>⚡【特殊事件触发】${usurperEvent.title}</b><p style="margin-top:4px;">${usurperEvent.desc}</p>`;
+        alertBox.innerHTML = `<b>⚡【唯一突发时机 · 错过永不再现】${usurperEvent.title}</b><p style="margin-top:4px;">${usurperEvent.desc}</p>`;
         choicesContainer.appendChild(alertBox);
 
         usurperEvent.choices.forEach(c => {
             const btn = document.createElement("button");
             btn.className = "choice-btn";
             btn.style.borderColor = "#e74c3c";
-            btn.innerHTML = `<span>${c.text}</span> <span>➡️</span>`;
+            btn.innerHTML = `<span>${c.text}</span> <span>⏳</span>`;
             btn.onclick = () => submitUsurperChoice(c.id);
             choicesContainer.appendChild(btn);
         });
@@ -639,7 +654,7 @@ async function loadCurrentStory() {
     (ch.choices || []).forEach((c, idx) => {
         const btn = document.createElement("button");
         btn.className = "choice-btn";
-        btn.innerHTML = `<span>${c.text}</span> <span>✨</span>`;
+        btn.innerHTML = `<span>${c.text}</span> <span>⏳ 决断</span>`;
         btn.onclick = () => submitStoryChoice(ch.id, idx);
         choicesContainer.appendChild(btn);
     });
@@ -653,7 +668,7 @@ async function submitStoryChoice(chapterId, choiceIndex) {
         if (currentCh && currentCh.choices && currentCh.choices[choiceIndex]) {
             const chosen = currentCh.choices[choiceIndex];
             if (chosen.response) {
-                alert(`💖 ${chosen.response}`);
+                alert(`⏳【命运时间推进】\n${chosen.response}\n\n（该事件已成既定历史，时间单向流逝，错过的心动将永不复返）`);
             }
             if (chosen.trigger_dating) {
                 ce.startDating(ce.state.crush_id);
@@ -674,54 +689,13 @@ async function submitStoryChoice(chapterId, choiceIndex) {
         });
         const data = await res.json();
         if (data.success) {
+            alert(`⏳【命运时间推进】时间单向流向下一日程，错过的分支将永久关闭！`);
             await fetchGameState();
             renderAll();
         }
     } catch (e) {
         console.error(e);
     }
-}
-
-// ==================== 章节选择与目录回顾 ====================
-function showChapterListModal() {
-    const modal = document.getElementById("chapter-modal");
-    if (!modal) return;
-    modal.style.display = "flex";
-
-    const container = document.getElementById("chapter-list-container");
-    container.innerHTML = "";
-
-    const allStories = (window.GAME_DATA && window.GAME_DATA.stories) || [];
-    const currentIdx = (gameState && gameState.story_index !== undefined) ? gameState.story_index : 0;
-
-    allStories.forEach((ch, idx) => {
-        const div = document.createElement("div");
-        div.className = `chapter-item ${idx === currentIdx ? 'active' : ''}`;
-        div.innerHTML = `
-            <div class="chapter-item-title">${ch.title} ${idx === currentIdx ? '📍 (当前进行中)' : ''}</div>
-            <div class="chapter-item-desc">${ch.desc}</div>
-        `;
-        div.onclick = () => jumpToChapter(idx);
-        container.appendChild(div);
-    });
-}
-
-function closeChapterListModal() {
-    const modal = document.getElementById("chapter-modal");
-    if (modal) modal.style.display = "none";
-}
-
-function jumpToChapter(idx) {
-    if (isClientMode && window.clientEngine) {
-        window.clientEngine.state.story_index = idx;
-        window.clientEngine.saveState();
-        gameState = window.clientEngine.getSummary();
-    } else {
-        // 服务端同步
-        if (gameState) gameState.story_index = idx;
-    }
-    closeChapterListModal();
-    renderAll();
 }
 
 // ==================== 核心男主专属 1v1 私密约会篇章 ====================
