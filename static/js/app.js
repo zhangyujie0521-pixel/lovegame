@@ -102,7 +102,9 @@ function renderAll() {
         dangerPill.className = "danger-meter-pill";
     }
 
-    // 3. 渲染各个模块
+    // 3. 渲染各个模块 (以剧情和约会为核心)
+    loadCurrentStory();
+    renderDateList();
     renderRoster();
     loadGroupChat();
     renderPrivateMembersSlider();
@@ -540,8 +542,9 @@ async function loadCurrentStory() {
     let canTriggerUsurper = false;
     let usurperEvent = null;
 
+    const sIdx = (gameState && gameState.story_index !== undefined) ? gameState.story_index : 0;
+
     if (isClientMode && window.GAME_DATA) {
-        const sIdx = (gameState && gameState.story_index) || 0;
         const allStories = window.GAME_DATA.stories;
         ch = allStories[Math.min(sIdx, allStories.length - 1)];
 
@@ -559,22 +562,46 @@ async function loadCurrentStory() {
             usurperEvent = data.usurper_event;
         } catch (e) {
             if (window.GAME_DATA) {
-                ch = window.GAME_DATA.stories[0];
+                ch = window.GAME_DATA.stories[Math.min(sIdx, window.GAME_DATA.stories.length - 1)];
             }
         }
     }
 
     if (!ch) return;
 
+    // 更新章节标题与指示器
+    const totalChapters = (window.GAME_DATA && window.GAME_DATA.stories) ? window.GAME_DATA.stories.length : 8;
+    const progressEl = document.getElementById("story-progress-indicator");
+    if (progressEl) progressEl.textContent = `第 ${Math.min(sIdx + 1, totalChapters)}/${totalChapters} 章`;
+
     document.getElementById("story-chapter-title").textContent = ch.title;
     document.getElementById("story-chapter-desc").textContent = ch.desc;
 
-    const vp = document.getElementById("story-viewport");
-    vp.innerHTML = "";
-
+    // 更新舞台立绘区（根据章节核心人物渲染）
     const brotherName = gameState ? gameState.brother_name : "顾寒沉";
     const crushName = gameState ? gameState.crush_name : "陆时衍";
     const careerName = (gameState && gameState.career) ? gameState.career.name : "化妆造型师";
+
+    const speakerTag = document.getElementById("stage-speaker-tag");
+    const halo = document.querySelector(".character-glow-halo");
+    if (speakerTag && halo) {
+        if (sIdx === 0) {
+            speakerTag.textContent = `未出道少年 · ${brotherName}`;
+            halo.textContent = brotherName.charAt(0);
+        } else if (sIdx === 1 || sIdx === 2 || sIdx === 6) {
+            speakerTag.textContent = `暗恋者 · ${crushName}`;
+            halo.textContent = crushName.charAt(0);
+        } else if (sIdx === 7) {
+            speakerTag.textContent = `🚨 全员黑化修罗场`;
+            halo.textContent = "💥";
+        } else {
+            speakerTag.textContent = `ASTERIA 顶流舞台`;
+            halo.textContent = "✨";
+        }
+    }
+
+    const vp = document.getElementById("story-viewport");
+    vp.innerHTML = "";
 
     ch.dialogues.forEach(d => {
         let spk = d.speaker.replace("【亲哥哥】", `【哥哥 · ${brotherName}】`).replace("【暗恋者】", `【暗恋者 · ${crushName}】`);
@@ -587,6 +614,7 @@ async function loadCurrentStory() {
         `;
         vp.appendChild(div);
     });
+    vp.scrollTop = vp.scrollHeight;
 
     const choicesContainer = document.getElementById("story-choices-container");
     choicesContainer.innerHTML = "";
@@ -620,11 +648,21 @@ async function loadCurrentStory() {
 async function submitStoryChoice(chapterId, choiceIndex) {
     if (isClientMode && window.clientEngine) {
         const ce = window.clientEngine;
-        ce.state.story_index = Math.min((window.GAME_DATA.stories.length - 1), (ce.state.story_index || 0) + 1);
+        const allStories = window.GAME_DATA.stories;
+        const currentCh = allStories[ce.state.story_index || 0];
+        if (currentCh && currentCh.choices && currentCh.choices[choiceIndex]) {
+            const chosen = currentCh.choices[choiceIndex];
+            if (chosen.response) {
+                alert(`💖 ${chosen.response}`);
+            }
+            if (chosen.trigger_dating) {
+                ce.startDating(ce.state.crush_id);
+            }
+        }
+        ce.state.story_index = Math.min(allStories.length - 1, (ce.state.story_index || 0) + 1);
         ce.saveState();
         gameState = ce.getSummary();
         renderAll();
-        loadCurrentStory();
         return;
     }
 
@@ -638,11 +676,108 @@ async function submitStoryChoice(chapterId, choiceIndex) {
         if (data.success) {
             await fetchGameState();
             renderAll();
-            loadCurrentStory();
         }
     } catch (e) {
         console.error(e);
     }
+}
+
+// ==================== 章节选择与目录回顾 ====================
+function showChapterListModal() {
+    const modal = document.getElementById("chapter-modal");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    const container = document.getElementById("chapter-list-container");
+    container.innerHTML = "";
+
+    const allStories = (window.GAME_DATA && window.GAME_DATA.stories) || [];
+    const currentIdx = (gameState && gameState.story_index !== undefined) ? gameState.story_index : 0;
+
+    allStories.forEach((ch, idx) => {
+        const div = document.createElement("div");
+        div.className = `chapter-item ${idx === currentIdx ? 'active' : ''}`;
+        div.innerHTML = `
+            <div class="chapter-item-title">${ch.title} ${idx === currentIdx ? '📍 (当前进行中)' : ''}</div>
+            <div class="chapter-item-desc">${ch.desc}</div>
+        `;
+        div.onclick = () => jumpToChapter(idx);
+        container.appendChild(div);
+    });
+}
+
+function closeChapterListModal() {
+    const modal = document.getElementById("chapter-modal");
+    if (modal) modal.style.display = "none";
+}
+
+function jumpToChapter(idx) {
+    if (isClientMode && window.clientEngine) {
+        window.clientEngine.state.story_index = idx;
+        window.clientEngine.saveState();
+        gameState = window.clientEngine.getSummary();
+    } else {
+        // 服务端同步
+        if (gameState) gameState.story_index = idx;
+    }
+    closeChapterListModal();
+    renderAll();
+}
+
+// ==================== 核心男主专属 1v1 私密约会篇章 ====================
+function renderDateList() {
+    const container = document.getElementById("dates-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const datesMap = (window.GAME_DATA && window.GAME_DATA.characterDates) || {};
+    const chars = (window.GAME_DATA && window.GAME_DATA.characters) || [];
+
+    Object.keys(datesMap).forEach(charId => {
+        const dateData = datesMap[charId];
+        const char = chars.find(c => c.id === charId) || { name: "男主", avatar_color: "#e2b97f", unit: "ASTERIA" };
+        const card = document.createElement("div");
+        card.className = "date-card";
+        card.innerHTML = `
+            <div class="date-avatar" style="background:${char.avatar_color}">
+                ${char.name.charAt(0)}
+            </div>
+            <div class="date-info">
+                <div class="date-title">${dateData.title}</div>
+                <div class="date-desc">${char.unit} · 点击开启 1v1 甜蜜约会篇章</div>
+            </div>
+            <button class="btn-mini" style="border-color:var(--accent-pink); color:var(--accent-pink);">约会</button>
+        `;
+        card.onclick = () => playCharacterDate(charId);
+        container.appendChild(card);
+    });
+}
+
+function playCharacterDate(charId) {
+    const datesMap = (window.GAME_DATA && window.GAME_DATA.characterDates) || {};
+    const dateData = datesMap[charId];
+    if (!dateData) return;
+
+    const playView = document.getElementById("date-play-view");
+    const titleEl = document.getElementById("date-play-title");
+    const dialoguesEl = document.getElementById("date-play-dialogues");
+
+    playView.style.display = "block";
+    titleEl.textContent = `🌹 ${dateData.title}`;
+    dialoguesEl.innerHTML = "";
+
+    dateData.dialogues.forEach(d => {
+        const div = document.createElement("div");
+        div.style = "background:rgba(255,255,255,0.06); padding:8px 10px; border-radius:10px; font-size:12px; line-height:1.5;";
+        div.innerHTML = `<b style="color:var(--accent-gold);">${d.speaker}：</b> ${d.text}`;
+        dialoguesEl.appendChild(div);
+    });
+    playView.scrollIntoView({ behavior: "smooth" });
+}
+
+function closeDatePlay() {
+    const playView = document.getElementById("date-play-view");
+    if (playView) playView.style.display = "none";
 }
 
 async function submitUsurperChoice(actionId) {
