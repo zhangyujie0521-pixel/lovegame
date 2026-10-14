@@ -1,7 +1,8 @@
-// ASTERIA 乙游客户端主交互逻辑
+// ASTERIA 乙游客户端主交互逻辑 (支持 FastAPI 服务后端与 GitHub Pages 纯静态单机引擎双模自适应)
 let gameState = null;
 let activePrivateCharId = null;
 let currentChatSubtab = 'group'; // 'group' or 'private'
+let isClientMode = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     initApp();
@@ -9,8 +10,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function initApp() {
     setupNavListeners();
+
+    // 智能环境检测：GitHub Pages / file 协议 / 或无 API 服务时自动启用纯前端单机引擎
+    if (window.location.hostname.includes("github.io") || window.location.protocol === "file:") {
+        isClientMode = true;
+    } else {
+        try {
+            const probe = await fetch("/api/state", { method: "GET" });
+            if (!probe.ok) isClientMode = true;
+        } catch (e) {
+            isClientMode = true;
+        }
+    }
+
+    console.log("ASTERIA Engine Mode:", isClientMode ? "纯前端独立引擎 (GitHub Pages/Offline)" : "FastAPI 后端驱动");
+
     await fetchLLMStatus();
     await fetchGameState();
+
     if (!gameState || !gameState.is_active) {
         showGenesisModal();
     } else {
@@ -40,12 +57,20 @@ function setupNavListeners() {
 
 // 获取游戏全局状态
 async function fetchGameState() {
+    if (isClientMode && window.clientEngine) {
+        gameState = window.clientEngine.getSummary();
+        return gameState;
+    }
+
     try {
         const res = await fetch("/api/state");
         gameState = await res.json();
         return gameState;
     } catch (e) {
-        console.error("加载状态失败", e);
+        console.warn("后端状态获取失败，降级客户端模式");
+        isClientMode = true;
+        if (window.clientEngine) gameState = window.clientEngine.getSummary();
+        return gameState;
     }
 }
 
@@ -61,12 +86,12 @@ function renderAll() {
     }
 
     // 2. 顶部状态栏
-    document.getElementById("player-name-display").textContent = gameState.player_name;
-    document.getElementById("player-career-display").textContent = gameState.career ? gameState.career.name : "制作人";
+    document.getElementById("player-name-display").textContent = gameState.player_name || "林初";
+    document.getElementById("player-career-display").textContent = gameState.career ? gameState.career.name : "化妆造型师";
     
     // 危险度药丸
     const dangerPill = document.getElementById("danger-pill");
-    const count = gameState.dating_count;
+    const count = gameState.dating_count || 0;
     dangerPill.innerHTML = `<span>❤️ 秘恋 ${count}/3</span>`;
     if (gameState.is_total_blackened) {
         dangerPill.className = "danger-meter-pill danger-high";
@@ -88,29 +113,35 @@ async function showGenesisModal() {
     const modal = document.getElementById("genesis-modal");
     modal.style.display = "flex";
 
-    // 加载职业列表
-    try {
-        const metaRes = await fetch("/api/meta");
-        const meta = await metaRes.json();
-        const container = document.getElementById("career-options-container");
-        container.innerHTML = "";
-        meta.careers.forEach((c, idx) => {
-            const div = document.createElement("div");
-            div.className = `career-option ${idx === 0 ? 'selected' : ''}`;
-            div.dataset.id = c.id;
-            div.innerHTML = `
-                <div class="career-title">${c.name} · <span style="color:var(--accent-gold);font-size:11px;">${c.tag}</span></div>
-                <div class="career-desc">${c.desc}</div>
-            `;
-            div.onclick = () => {
-                document.querySelectorAll(".career-option").forEach(el => el.classList.remove("selected"));
-                div.classList.add("selected");
-            };
-            container.appendChild(div);
-        });
-    } catch (e) {
-        console.error(e);
+    let careers = [];
+    if (isClientMode && window.GAME_DATA) {
+        careers = window.GAME_DATA.careers;
+    } else {
+        try {
+            const metaRes = await fetch("/api/meta");
+            const meta = await metaRes.json();
+            careers = meta.careers;
+        } catch (e) {
+            careers = window.GAME_DATA ? window.GAME_DATA.careers : [];
+        }
     }
+
+    const container = document.getElementById("career-options-container");
+    container.innerHTML = "";
+    careers.forEach((c, idx) => {
+        const div = document.createElement("div");
+        div.className = `career-option ${idx === 0 ? 'selected' : ''}`;
+        div.dataset.id = c.id;
+        div.innerHTML = `
+            <div class="career-title">${c.name} · <span style="color:var(--accent-gold);font-size:11px;">${c.tag}</span></div>
+            <div class="career-desc">${c.desc}</div>
+        `;
+        div.onclick = () => {
+            document.querySelectorAll(".career-option").forEach(el => el.classList.remove("selected"));
+            div.classList.add("selected");
+        };
+        container.appendChild(div);
+    });
 }
 
 async function submitGenesis() {
@@ -121,6 +152,16 @@ async function submitGenesis() {
     const btn = document.getElementById("btn-start-genesis");
     btn.textContent = "🎲 命运轮盘旋转中...抽选中...";
     btn.disabled = true;
+
+    if (isClientMode && window.clientEngine) {
+        gameState = window.clientEngine.resetGame(nameInput, careerId);
+        document.getElementById("genesis-modal").style.display = "none";
+        btn.textContent = "启动命运轮盘 (从0开始)";
+        btn.disabled = false;
+        alert(`【命运揭晓】\n👑 你的亲哥哥是：${gameState.brother_name}！\n🤫 12位队友中，有一位暗恋者已埋下心动宿命！\n其余11位成员初始为 0 好感，请通过剧情展开攻略！`);
+        renderAll();
+        return;
+    }
 
     try {
         const res = await fetch("/api/new_game", {
@@ -134,21 +175,24 @@ async function submitGenesis() {
             document.getElementById("genesis-modal").style.display = "none";
             btn.textContent = "启动命运轮盘 (从0开始)";
             btn.disabled = false;
-
-            // 弹出宿命揭晓动画提醒
             alert(`【命运揭晓】\n👑 你的亲哥哥是：${gameState.brother_name}！\n🤫 12位队友中，有一位暗恋者已埋下心动宿命！\n其余11位成员初始为 0 好感，请通过剧情展开攻略！`);
             renderAll();
         }
     } catch (e) {
-        alert("启动失败，请检查网络！");
+        alert("启动失败，自动切换纯前端模式！");
+        isClientMode = true;
+        gameState = window.clientEngine.resetGame(nameInput, careerId);
+        document.getElementById("genesis-modal").style.display = "none";
+        btn.textContent = "启动命运轮盘 (从0开始)";
         btn.disabled = false;
+        renderAll();
     }
 }
 
 // ==================== 13人花名册 (Roster) ====================
 function renderRoster() {
     const list = document.getElementById("roster-list");
-    if (!list || !gameState.members) return;
+    if (!list || !gameState || !gameState.members) return;
 
     list.innerHTML = "";
     gameState.members.forEach(m => {
@@ -202,8 +246,24 @@ function renderRoster() {
     });
 }
 
-// 快速确立交往（测试/达成）
+// 快速确立交往
 async function startDatingQuick(charId) {
+    if (isClientMode && window.clientEngine) {
+        const res = window.clientEngine.startDating(charId);
+        if (res.success) {
+            gameState = window.clientEngine.getSummary();
+            renderAll();
+            if (res.is_blackened) {
+                alert("🚨【灾难级暴雷】交往人数达到 4 人！全团黑化剧情彻底爆发！所有人理智全无！");
+            } else {
+                alert(`💖 已成功与 ${res.char_name} 确立秘密恋爱关系！当前地下秘密交往：${res.dating_count}/3 人。切记千万别让其他人发现！`);
+            }
+        } else {
+            alert(res.message);
+        }
+        return;
+    }
+
     try {
         const res = await fetch("/api/dating/toggle", {
             method: "POST",
@@ -241,7 +301,6 @@ function switchChatSubtab(type) {
         document.getElementById("group-chat-view").style.display = "none";
         document.getElementById("private-chat-view").style.display = "flex";
         if (!activePrivateCharId && gameState.members && gameState.members.length > 0) {
-            // 默认选暗恋者或第一个非哥哥
             activePrivateCharId = gameState.crush_id || gameState.members[0].id;
         }
         loadPrivateChat(activePrivateCharId);
@@ -249,36 +308,45 @@ function switchChatSubtab(type) {
 }
 
 async function loadGroupChat() {
-    try {
-        const res = await fetch("/api/chat/group");
-        const data = await res.json();
-        const container = document.getElementById("group-messages-box");
-        container.innerHTML = "";
-
-        data.messages.forEach(m => {
-            const isMine = (m.sender_id === "player");
-            const div = document.createElement("div");
-            div.className = `message-bubble ${isMine ? 'mine' : 'other'}`;
-
-            let roleTag = "";
-            if (m.sender_id === gameState.brother_id) {
-                roleTag = `<span class="msg-tag-brother">亲哥</span>`;
-            } else if (m.sender_id === gameState.crush_id) {
-                roleTag = `<span class="msg-tag-crush">暗恋者</span>`;
-            } else if (gameState.dating_list.includes(m.sender_id)) {
-                roleTag = `<span class="msg-tag-dating">秘密男友</span>`;
+    let messages = [];
+    if (isClientMode && window.clientEngine) {
+        messages = window.clientEngine.state ? window.clientEngine.state.group_messages : [];
+    } else {
+        try {
+            const res = await fetch("/api/chat/group");
+            const data = await res.json();
+            messages = data.messages || [];
+        } catch (e) {
+            if (window.clientEngine && window.clientEngine.state) {
+                messages = window.clientEngine.state.group_messages;
             }
-
-            div.innerHTML = `
-                ${!isMine ? `<div class="msg-sender">${m.sender_name} ${roleTag}</div>` : ''}
-                <div class="msg-body">${m.text}</div>
-            `;
-            container.appendChild(div);
-        });
-        container.scrollTop = container.scrollHeight;
-    } catch (e) {
-        console.error(e);
+        }
     }
+
+    const container = document.getElementById("group-messages-box");
+    container.innerHTML = "";
+
+    messages.forEach(m => {
+        const isMine = (m.sender_id === "player");
+        const div = document.createElement("div");
+        div.className = `message-bubble ${isMine ? 'mine' : 'other'}`;
+
+        let roleTag = "";
+        if (m.sender_id === gameState.brother_id) {
+            roleTag = `<span class="msg-tag-brother">亲哥</span>`;
+        } else if (m.sender_id === gameState.crush_id) {
+            roleTag = `<span class="msg-tag-crush">暗恋者</span>`;
+        } else if (gameState.dating_list && gameState.dating_list.includes(m.sender_id)) {
+            roleTag = `<span class="msg-tag-dating">秘密男友</span>`;
+        }
+
+        div.innerHTML = `
+            ${!isMine ? `<div class="msg-sender">${m.sender_name} ${roleTag}</div>` : ''}
+            <div class="msg-body">${m.text}</div>
+        `;
+        container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
 }
 
 async function sendGroupMessage() {
@@ -288,7 +356,6 @@ async function sendGroupMessage() {
 
     input.value = "";
 
-    // 立即在界面上插入用户的消息，以及正在输入中的提示气泡
     const container = document.getElementById("group-messages-box");
     const userDiv = document.createElement("div");
     userDiv.className = "message-bubble mine";
@@ -300,10 +367,17 @@ async function sendGroupMessage() {
     typingDiv.id = "group-typing-indicator";
     typingDiv.innerHTML = `
         <div class="msg-sender" style="color:var(--accent-gold);">ASTERIA 成员们</div>
-        <div class="msg-body"><span class="typing-dots"><span></span><span></span><span></span></span> 正在群里输入...</div>
+        <div class="msg-body"><span class="typing-dots"><span></span><span></span><span></span></span> 正在群里敲字...</div>
     `;
     container.appendChild(typingDiv);
     container.scrollTop = container.scrollHeight;
+
+    if (isClientMode && window.clientEngine) {
+        await window.clientEngine.handleGroupMessage(text);
+        if (typingDiv) typingDiv.remove();
+        loadGroupChat();
+        return;
+    }
 
     try {
         const res = await fetch("/api/chat/group/send", {
@@ -317,13 +391,18 @@ async function sendGroupMessage() {
         }
     } catch (e) {
         console.error(e);
+        if (window.clientEngine) {
+            await window.clientEngine.handleGroupMessage(text);
+            loadGroupChat();
+        }
+    } finally {
         if (typingDiv) typingDiv.remove();
     }
 }
 
 function renderPrivateMembersSlider() {
     const slider = document.getElementById("private-slider");
-    if (!slider || !gameState.members) return;
+    if (!slider || !gameState || !gameState.members) return;
 
     slider.innerHTML = "";
     gameState.members.forEach(m => {
@@ -344,7 +423,6 @@ function renderPrivateMembersSlider() {
 }
 
 function openPrivateChatWith(charId) {
-    // 切换到聊天 Tab
     document.querySelector('[data-tab="tab-chat"]').click();
     activePrivateCharId = charId;
     switchChatSubtab("private");
@@ -353,36 +431,50 @@ function openPrivateChatWith(charId) {
 
 async function loadPrivateChat(charId) {
     if (!charId) return;
-    try {
-        const res = await fetch(`/api/chat/private/${charId}`);
-        const data = await res.json();
-        const container = document.getElementById("private-messages-box");
-        container.innerHTML = "";
+    let char = null;
+    let history = [];
 
-        const char = data.character;
-        document.getElementById("private-chat-title").textContent = `与 ${char.name} 的私密会话 (${char.affinity}/100)`;
-
-        if (data.history.length === 0) {
-            container.innerHTML = `
-                <div style="text-align:center;color:var(--text-muted);font-size:12px;margin:auto;">
-                    这里是与 ${char.name} 的私聊。<br>发送第一条消息打破沉寂吧……
-                </div>
-            `;
-        } else {
-            data.history.forEach(m => {
-                const isMine = (m.sender === "player");
-                const div = document.createElement("div");
-                div.className = `message-bubble ${isMine ? 'mine' : 'other'}`;
-                div.innerHTML = `
-                    ${!isMine ? `<div class="msg-sender">${char.name}</div>` : ''}
-                    <div class="msg-body">${m.text}</div>
-                `;
-                container.appendChild(div);
-            });
-            container.scrollTop = container.scrollHeight;
+    if (isClientMode && window.clientEngine) {
+        char = window.clientEngine.state.characters[charId];
+        history = window.clientEngine.state.private_chats[charId] || [];
+    } else {
+        try {
+            const res = await fetch(`/api/chat/private/${charId}`);
+            const data = await res.json();
+            char = data.character;
+            history = data.history || [];
+        } catch (e) {
+            if (window.clientEngine && window.clientEngine.state) {
+                char = window.clientEngine.state.characters[charId];
+                history = window.clientEngine.state.private_chats[charId] || [];
+            }
         }
-    } catch (e) {
-        console.error(e);
+    }
+
+    if (!char) return;
+
+    const container = document.getElementById("private-messages-box");
+    container.innerHTML = "";
+    document.getElementById("private-chat-title").textContent = `与 ${char.name} 的私密会话 (${char.affinity}/100)`;
+
+    if (history.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center;color:var(--text-muted);font-size:12px;margin:auto;">
+                这里是与 ${char.name} 的私聊。<br>发送第一条消息打破沉寂吧……
+            </div>
+        `;
+    } else {
+        history.forEach(m => {
+            const isMine = (m.sender === "player");
+            const div = document.createElement("div");
+            div.className = `message-bubble ${isMine ? 'mine' : 'other'}`;
+            div.innerHTML = `
+                ${!isMine ? `<div class="msg-sender">${char.name}</div>` : ''}
+                <div class="msg-body">${m.text}</div>
+            `;
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
     }
 }
 
@@ -393,7 +485,6 @@ async function sendPrivateMessage() {
 
     input.value = "";
 
-    // 立即显示玩家消息与“对方正在输入…”
     const container = document.getElementById("private-messages-box");
     const userDiv = document.createElement("div");
     userDiv.className = "message-bubble mine";
@@ -409,6 +500,15 @@ async function sendPrivateMessage() {
     container.appendChild(typingDiv);
     container.scrollTop = container.scrollHeight;
 
+    if (isClientMode && window.clientEngine) {
+        await window.clientEngine.handlePrivateMessage(activePrivateCharId, text);
+        if (typingDiv) typingDiv.remove();
+        loadPrivateChat(activePrivateCharId);
+        gameState = window.clientEngine.getSummary();
+        renderRoster();
+        return;
+    }
+
     try {
         const res = await fetch("/api/chat/private/send", {
             method: "POST",
@@ -423,71 +523,111 @@ async function sendPrivateMessage() {
         }
     } catch (e) {
         console.error(e);
+        if (window.clientEngine) {
+            await window.clientEngine.handlePrivateMessage(activePrivateCharId, text);
+            loadPrivateChat(activePrivateCharId);
+            gameState = window.clientEngine.getSummary();
+            renderRoster();
+        }
+    } finally {
         if (typingDiv) typingDiv.remove();
     }
 }
 
 // ==================== 视觉小说剧场 (Story) ====================
 async function loadCurrentStory() {
-    try {
-        const res = await fetch("/api/story/current");
-        const data = await res.json();
-        const ch = data.chapter;
+    let ch = null;
+    let canTriggerUsurper = false;
+    let usurperEvent = null;
 
-        document.getElementById("story-chapter-title").textContent = ch.title;
-        document.getElementById("story-chapter-desc").textContent = ch.desc;
+    if (isClientMode && window.GAME_DATA) {
+        const sIdx = (gameState && gameState.story_index) || 0;
+        const allStories = window.GAME_DATA.stories;
+        ch = allStories[Math.min(sIdx, allStories.length - 1)];
 
-        const vp = document.getElementById("story-viewport");
-        vp.innerHTML = "";
-
-        ch.dialogues.forEach(d => {
-            const div = document.createElement("div");
-            div.className = "story-bubble";
-            div.innerHTML = `
-                <div class="speaker-name">${d.speaker}</div>
-                <div class="dialogue-text">${d.text}</div>
-            `;
-            vp.appendChild(div);
-        });
-
-        // 选项渲染
-        const choicesContainer = document.getElementById("story-choices-container");
-        choicesContainer.innerHTML = "";
-
-        // 如果满足暗恋者暴雨夜上位剧情
-        if (data.can_trigger_usurper && data.usurper_event) {
-            const ue = data.usurper_event;
-            const alertBox = document.createElement("div");
-            alertBox.style = "background:rgba(231,76,60,0.2);border:1px solid #e74c3c;border-radius:12px;padding:10px;margin-bottom:8px;font-size:12px;";
-            alertBox.innerHTML = `<b>⚡【特殊事件触发】${ue.title}</b><p style="margin-top:4px;">${ue.desc}</p>`;
-            choicesContainer.appendChild(alertBox);
-
-            ue.choices.forEach(c => {
-                const btn = document.createElement("button");
-                btn.className = "choice-btn";
-                btn.style.borderColor = "#e74c3c";
-                btn.innerHTML = `<span>${c.text}</span> <span>➡️</span>`;
-                btn.onclick = () => submitUsurperChoice(c.id);
-                choicesContainer.appendChild(btn);
-            });
-            return;
+        const hasDating = gameState && gameState.dating_count > 0;
+        const crushAff = (gameState && gameState.characters && gameState.characters[gameState.crush_id]?.affinity) || 0;
+        const crushIsDating = gameState && gameState.characters && gameState.characters[gameState.crush_id]?.is_dating;
+        canTriggerUsurper = (hasDating && crushAff >= 30 && !crushIsDating);
+        usurperEvent = window.GAME_DATA.usurperEvent;
+    } else {
+        try {
+            const res = await fetch("/api/story/current");
+            const data = await res.json();
+            ch = data.chapter;
+            canTriggerUsurper = data.can_trigger_usurper;
+            usurperEvent = data.usurper_event;
+        } catch (e) {
+            if (window.GAME_DATA) {
+                ch = window.GAME_DATA.stories[0];
+            }
         }
+    }
 
-        // 普通主线选择
-        ch.choices.forEach((c, idx) => {
+    if (!ch) return;
+
+    document.getElementById("story-chapter-title").textContent = ch.title;
+    document.getElementById("story-chapter-desc").textContent = ch.desc;
+
+    const vp = document.getElementById("story-viewport");
+    vp.innerHTML = "";
+
+    const brotherName = gameState ? gameState.brother_name : "顾寒沉";
+    const crushName = gameState ? gameState.crush_name : "陆时衍";
+    const careerName = (gameState && gameState.career) ? gameState.career.name : "化妆造型师";
+
+    ch.dialogues.forEach(d => {
+        let spk = d.speaker.replace("【亲哥哥】", `【哥哥 · ${brotherName}】`).replace("【暗恋者】", `【暗恋者 · ${crushName}】`);
+        let txt = d.text.replace("【职业身份】", careerName);
+        const div = document.createElement("div");
+        div.className = "story-bubble";
+        div.innerHTML = `
+            <div class="speaker-name">${spk}</div>
+            <div class="dialogue-text">${txt}</div>
+        `;
+        vp.appendChild(div);
+    });
+
+    const choicesContainer = document.getElementById("story-choices-container");
+    choicesContainer.innerHTML = "";
+
+    if (canTriggerUsurper && usurperEvent) {
+        const alertBox = document.createElement("div");
+        alertBox.style = "background:rgba(231,76,60,0.2);border:1px solid #e74c3c;border-radius:12px;padding:10px;margin-bottom:8px;font-size:12px;";
+        alertBox.innerHTML = `<b>⚡【特殊事件触发】${usurperEvent.title}</b><p style="margin-top:4px;">${usurperEvent.desc}</p>`;
+        choicesContainer.appendChild(alertBox);
+
+        usurperEvent.choices.forEach(c => {
             const btn = document.createElement("button");
             btn.className = "choice-btn";
-            btn.innerHTML = `<span>${c.text}</span> <span>✨</span>`;
-            btn.onclick = () => submitStoryChoice(ch.id, idx);
+            btn.style.borderColor = "#e74c3c";
+            btn.innerHTML = `<span>${c.text}</span> <span>➡️</span>`;
+            btn.onclick = () => submitUsurperChoice(c.id);
             choicesContainer.appendChild(btn);
         });
-
-    } catch (e) {
-        console.error(e);
+        return;
     }
+
+    (ch.choices || []).forEach((c, idx) => {
+        const btn = document.createElement("button");
+        btn.className = "choice-btn";
+        btn.innerHTML = `<span>${c.text}</span> <span>✨</span>`;
+        btn.onclick = () => submitStoryChoice(ch.id, idx);
+        choicesContainer.appendChild(btn);
+    });
 }
 
 async function submitStoryChoice(chapterId, choiceIndex) {
+    if (isClientMode && window.clientEngine) {
+        const ce = window.clientEngine;
+        ce.state.story_index = Math.min((window.GAME_DATA.stories.length - 1), (ce.state.story_index || 0) + 1);
+        ce.saveState();
+        gameState = ce.getSummary();
+        renderAll();
+        loadCurrentStory();
+        return;
+    }
+
     try {
         const res = await fetch("/api/story/choice", {
             method: "POST",
@@ -505,15 +645,34 @@ async function submitStoryChoice(chapterId, choiceIndex) {
     }
 }
 
-async function submitUsurperChoice(action) {
+async function submitUsurperChoice(actionId) {
+    if (isClientMode && window.clientEngine) {
+        const ce = window.clientEngine;
+        if (actionId === "accept_usurper") {
+            ce.state.dating_list = [ce.state.crush_id];
+            ce.state.characters[ce.state.crush_id].is_dating = true;
+            alert("你握紧了他的手。暴雨夜的停车场，旧爱已逝，暗恋者强势上位！");
+        } else if (actionId === "double_dating") {
+            ce.startDating(ce.state.crush_id);
+            alert("你两边都不愿放弃！秘密男友名单增加至 " + ce.state.dating_list.length + " 人！");
+        } else {
+            alert("你狠心甩开了他的手。暗恋者红着眼眶退后半步，雨水湿透了他的碎发。");
+        }
+        ce.saveState();
+        gameState = ce.getSummary();
+        renderAll();
+        loadCurrentStory();
+        return;
+    }
+
     try {
         const res = await fetch("/api/usurper", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action })
+            body: JSON.stringify({ action: actionId })
         });
         const data = await res.json();
-        alert(data.msg);
+        alert(data.message);
         await fetchGameState();
         renderAll();
         loadCurrentStory();
@@ -528,12 +687,34 @@ async function drawGachaCard() {
     btn.disabled = true;
     btn.textContent = "祈愿中...召唤命运星芒...";
 
+    const resBox = document.getElementById("gacha-result-box");
+
+    if (isClientMode && window.clientEngine) {
+        const card = window.clientEngine.drawGacha();
+        resBox.innerHTML = `
+            <div class="card-display-box">
+                <span class="card-tier-badge">${card.tier}</span>
+                <div style="text-align:center;">
+                    <div class="card-title-lg">${card.title}</div>
+                    <div class="card-owner">${card.char_name} · ${card.scene}</div>
+                </div>
+                <div class="card-story-snippet">
+                    <b>【专属回忆】</b><br>${card.story_preview}
+                </div>
+            </div>
+        `;
+        gameState = window.clientEngine.getSummary();
+        renderAll();
+        btn.disabled = false;
+        btn.textContent = "✨ 注入星芒·单抽祈愿";
+        return;
+    }
+
     try {
         const res = await fetch("/api/gacha/draw", { method: "POST" });
         const data = await res.json();
         if (data.success) {
             const card = data.card;
-            const resBox = document.getElementById("gacha-result-box");
             resBox.innerHTML = `
                 <div class="card-display-box">
                     <span class="card-tier-badge">${card.tier}</span>
@@ -561,12 +742,34 @@ async function drawGachaCard() {
 let llmStatus = { is_configured: false, model: "deepseek-chat", api_base: "https://api.deepseek.com", masked_key: "" };
 
 async function fetchLLMStatus() {
+    if (isClientMode && window.clientEngine) {
+        const cfg = window.clientEngine.getLLMConfig();
+        const hasKey = Boolean(cfg.api_key && cfg.api_key.length > 5);
+        llmStatus = {
+            is_configured: hasKey,
+            model: cfg.model || "deepseek-chat",
+            api_base: cfg.api_base || "https://api.deepseek.com",
+            masked_key: hasKey ? `${cfg.api_key.slice(0, 4)}****${cfg.api_key.slice(-4)}` : ""
+        };
+        updateLLMUI();
+        return;
+    }
+
     try {
         const res = await fetch("/api/llm/status");
         llmStatus = await res.json();
         updateLLMUI();
     } catch (e) {
-        console.error("获取 LLM 状态异常:", e);
+        if (window.clientEngine) {
+            const cfg = window.clientEngine.getLLMConfig();
+            llmStatus = {
+                is_configured: Boolean(cfg.api_key),
+                model: cfg.model,
+                api_base: cfg.api_base,
+                masked_key: cfg.api_key ? "****" : ""
+            };
+            updateLLMUI();
+        }
     }
 }
 
@@ -627,6 +830,46 @@ async function testLLMConnection() {
     btn.textContent = "测试中...";
     statusBox.innerHTML = `<span style="color:#f39c12;">⏳ 正在向 DeepSeek 发起握手探测...</span>`;
 
+    if (isClientMode && window.clientEngine) {
+        const keyInput = document.getElementById("llm-api-key").value.trim() || window.clientEngine.getLLMConfig().api_key;
+        if (!keyInput) {
+            statusBox.innerHTML = `<span style="color:#e74c3c;">❌ 请先输入 API Key</span>`;
+            btn.disabled = false;
+            btn.textContent = "⚡ 测试连接";
+            return;
+        }
+
+        const model = document.getElementById("llm-model-select").value;
+        const apiBase = document.getElementById("llm-api-base").value.trim() || "https://api.deepseek.com";
+
+        try {
+            const res = await fetch(`${apiBase.replace(/\/+$/, "")}/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${keyInput}`
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{ role: "user", content: "请输出：连接正常" }],
+                    max_tokens: 20
+                })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                statusBox.innerHTML = `<span style="color:#2ecc71;">✅ 浏览器直连成功！回应: ${data.choices[0].message.content}</span>`;
+            } else {
+                statusBox.innerHTML = `<span style="color:#e74c3c;">❌ 接口返回错误: HTTP ${res.status}</span>`;
+            }
+        } catch (e) {
+            statusBox.innerHTML = `<span style="color:#e74c3c;">❌ 请求异常: ${e.message}</span>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "⚡ 测试连接";
+        }
+        return;
+    }
+
     try {
         const res = await fetch("/api/llm/test", { method: "POST" });
         const data = await res.json();
@@ -661,6 +904,21 @@ async function saveLLMConfig() {
     btn.disabled = true;
     btn.textContent = "保存中...";
 
+    if (isClientMode && window.clientEngine) {
+        const existing = window.clientEngine.getLLMConfig();
+        window.clientEngine.saveLLMConfig({
+            api_key: apiKey || existing.api_key,
+            api_base: apiBase,
+            model: model
+        });
+        await fetchLLMStatus();
+        alert("🎉 DeepSeek 大模型配置保存成功！13 位成员即刻拥有即时互动灵魂！");
+        keyInput.value = "";
+        btn.disabled = false;
+        btn.textContent = "💾 保存并激活";
+        return;
+    }
+
     try {
         const res = await fetch("/api/llm/config", {
             method: "POST",
@@ -688,6 +946,13 @@ async function saveLLMConfig() {
 
 async function clearLLMConfig() {
     if (!confirm("确定要清空 API Key 并切回纯本地精修词库保底模式吗？")) return;
+
+    if (isClientMode && window.clientEngine) {
+        window.clientEngine.saveLLMConfig({ api_key: "", api_base: "https://api.deepseek.com", model: "deepseek-chat" });
+        await fetchLLMStatus();
+        alert("已清空 API Key，当前已切回本地精修词库模式。");
+        return;
+    }
 
     try {
         const res = await fetch("/api/llm/config", {

@@ -1,31 +1,212 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Love Game</title>
-  <style>
-    body { margin: 0; padding: 0; background: #ffebee; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-    h1 { color: #d81b60; margin-bottom: 10px; }
-    #score-board { font-size: 20px; color: #880e4f; margin-bottom: 20px; }
-    #heart { font-size: 80px; cursor: pointer; user-select: none; transition: transform 0.1s; }
-    #heart:active { transform: scale(1.3); }
-    .tip { font-size: 14px; color: #ad1457; margin-top: 15px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ASTERIA · 顶流男团恋爱物语 (Idol Otome Game)</title>
+    <link rel="stylesheet" href="./static/css/style.css">
 </head>
 <body>
-  <h1>Love Game</h1>
-  <div id="score-board">爱心值: <span id="score">0</span></div>
-  <div id="heart">❤️</div>
-  <div class="tip">轻触爱心收集爱心值</div>
-  <script>
-    let score = 0;
-    const scoreEl = document.getElementById('score');
-    const heart = document.getElementById('heart');
-    heart.addEventListener('pointerdown', () => {
-      score += 1;
-      scoreEl.textContent = score;
-    });
-  </script>
+
+<div class="phone-wrapper">
+    <!-- 顶部状态栏 -->
+    <header class="phone-header">
+        <div class="status-bar">
+            <span>9:42</span>
+            <div class="island-notch">ASTERIA OS</div>
+            <span>5G 100%</span>
+        </div>
+        <div class="player-info-banner">
+            <div class="player-meta">
+                <h3>
+                    <span id="player-name-display">林初</span>
+                    <span class="badge-career" id="player-career-display">首席化妆师</span>
+                </h3>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button id="btn-open-llm" class="btn-ai-pill" onclick="openLLMModal()" title="点击配置 DeepSeek AI 拟真对话">
+                    <span class="ai-dot"></span>
+                    <span id="ai-status-label">🤖 DeepSeek</span>
+                </button>
+                <div id="danger-pill" class="danger-meter-pill">
+                    <span>❤️ 秘恋 0/3</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主视口内容区 -->
+    <main class="phone-content">
+        <!-- Tab 1: 手机通讯录与大群/私聊 -->
+        <section id="tab-chat" class="tab-pane active">
+            <div class="chat-tab-container">
+                <div class="chat-subtabs">
+                    <button id="btn-subtab-group" class="subtab-btn active" onclick="switchChatSubtab('group')">
+                        📢 13人大群
+                    </button>
+                    <button id="btn-subtab-private" class="subtab-btn" onclick="switchChatSubtab('private')">
+                        💌 1v1 私聊
+                    </button>
+                </div>
+
+                <!-- 13人官方大群视图 -->
+                <div id="group-chat-view" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+                    <div id="group-messages-box" class="chat-messages-box"></div>
+                    <div class="chat-input-row">
+                        <input type="text" id="group-input" class="chat-input" placeholder="在大群里发言（哥哥随时紧盯防狼）..." onkeydown="if(event.key==='Enter') sendGroupMessage()">
+                        <button class="chat-send-btn" onclick="sendGroupMessage()">发送</button>
+                    </div>
+                </div>
+
+                <!-- 1v1 私聊视图 -->
+                <div id="private-chat-view" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+                    <div id="private-slider" class="private-member-slider"></div>
+                    <div id="private-chat-title" style="font-size:11px; color:var(--accent-gold); margin-bottom:6px; font-weight:600;"></div>
+                    <div id="private-messages-box" class="chat-messages-box"></div>
+                    <div class="chat-input-row">
+                        <input type="text" id="private-input" class="chat-input" placeholder="与他悄悄私聊..." onkeydown="if(event.key==='Enter') sendPrivateMessage()">
+                        <button class="chat-send-btn" onclick="sendPrivateMessage()">私戳</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab 2: 视觉小说主线剧场 -->
+        <section id="tab-story" class="tab-pane">
+            <div class="story-container">
+                <div class="story-header">
+                    <h2 id="story-chapter-title">序章 · 地下室的绿光与泡面</h2>
+                    <p id="story-chapter-desc">七年前，他们还不是名动全球的 ASTERIA……</p>
+                </div>
+                <div id="story-viewport" class="story-viewport"></div>
+                <div id="story-choices-container" class="story-choices"></div>
+            </div>
+        </section>
+
+        <!-- Tab 3: 13 人全员花名册 (年龄排序) -->
+        <section id="tab-roster" class="tab-pane">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+                <span>👥 13位成员（严格年龄由长至幼排序）</span>
+                <span style="color:var(--accent-gold);font-size:11px;">1哥哥·1暗恋·11初始0好感</span>
+            </div>
+            <div id="roster-list" class="roster-container"></div>
+        </section>
+
+        <!-- Tab 4: 抽卡神殿 -->
+        <section id="tab-gacha" class="tab-pane">
+            <div class="gacha-container">
+                <div class="gacha-banner">
+                    <h2>✨ ASTERIA 星芒神殿</h2>
+                    <p>抽取专属限定回忆卡牌 · 解锁深夜独家私密剧情</p>
+                </div>
+                <div id="gacha-result-box" class="gacha-card-result">
+                    <div style="color:var(--text-muted);font-size:13px;">
+                        点击下方按钮抽取卡牌<br>抽取到对应成员卡牌将直接提升好感度！
+                    </div>
+                </div>
+                <button id="btn-draw-card" class="gacha-btn-main" onclick="drawGachaCard()">
+                    ✨ 注入星芒 · 单抽祈愿
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- 底部导航 Dock 栏 -->
+    <nav class="bottom-nav">
+        <div class="nav-item active" data-tab="tab-chat">
+            <span class="icon">💬</span>
+            <span>手机消息</span>
+        </div>
+        <div class="nav-item" data-tab="tab-story">
+            <span class="icon">📖</span>
+            <span>主线剧场</span>
+        </div>
+        <div class="nav-item" data-tab="tab-roster">
+            <span class="icon">👑</span>
+            <span>13人男团</span>
+        </div>
+        <div class="nav-item" data-tab="tab-gacha">
+            <span class="icon">🎴</span>
+            <span>抽卡约会</span>
+        </div>
+    </nav>
+
+    <!-- 开局创角与命运轮盘模态框 (Genesis Modal) -->
+    <div id="genesis-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-card">
+            <h2>🎲 ASTERIA 命运启航 (从0开局)</h2>
+            <p style="font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:14px;">
+                重新开始攻略！每次开局随机抽取 1 位亲哥哥，再从 12 位队友中秘密抽取 1 位暗恋者！其余 11 人从 0 好感开始慢慢攀登！
+            </p>
+
+            <div class="genesis-field">
+                <label>女主姓名</label>
+                <input type="text" id="genesis-name" class="genesis-input" value="林初">
+            </div>
+
+            <div class="genesis-field">
+                <label>选择女主自由职业（决定专属切入视角与剧情加成）</label>
+                <div id="career-options-container" class="career-grid"></div>
+            </div>
+
+            <button id="btn-start-genesis" class="btn-primary-block" onclick="submitGenesis()">
+                🎲 启动命运轮盘 (从0开始)
+            </button>
+        </div>
+    </div>
+
+    <!-- DeepSeek 大模型驱动设置模态框 (LLM Modal) -->
+    <div id="llm-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h2 style="font-size:16px; margin:0;">🤖 DeepSeek AI 灵魂注入</h2>
+                <button onclick="closeLLMModal()" style="background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer;">✕</button>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
+                接入 <b>DeepSeek-V3/R1</b>，赋予 13 位男主无穷尽的拟真即时对话、兄妹查岗修罗场与病娇黑化推拉。若未配置或调用超时，系统将自动无缝降级为本地精修台词保底。
+            </p>
+
+            <div class="genesis-field">
+                <label>DeepSeek API Key</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="password" id="llm-api-key" class="genesis-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxx" style="flex:1;">
+                    <button type="button" class="btn-mini" onclick="toggleKeyVisibility()" style="white-space:nowrap;">👁️</button>
+                </div>
+            </div>
+
+            <div class="genesis-field">
+                <label>模型选择</label>
+                <select id="llm-model-select" class="genesis-input" style="background:var(--bg-secondary); color:var(--text-primary);">
+                    <option value="deepseek-chat">deepseek-chat (DeepSeek-V3 推荐 · 拟真推拉秒回)</option>
+                    <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1 · 深度思考版)</option>
+                </select>
+            </div>
+
+            <div class="genesis-field">
+                <label>API Base URL (默认官方地址)</label>
+                <input type="text" id="llm-api-base" class="genesis-input" value="https://api.deepseek.com">
+            </div>
+
+            <div id="llm-status-box" style="font-size:11px; padding:8px 10px; border-radius:8px; margin-bottom:12px; background:rgba(255,255,255,0.05); color:var(--text-muted); border:1px solid var(--border-color);">
+                检测状态中...
+            </div>
+
+            <div style="display:flex; gap:8px;">
+                <button id="btn-test-llm" class="btn-mini" style="flex:1; padding:8px;" onclick="testLLMConnection()">⚡ 测试连接</button>
+                <button id="btn-save-llm" class="chat-send-btn" style="flex:1; padding:8px;" onclick="saveLLMConfig()">💾 保存并激活</button>
+            </div>
+
+            <div style="margin-top:8px; text-align:center;">
+                <button onclick="clearLLMConfig()" style="background:none; border:none; font-size:11px; color:#e74c3c; cursor:pointer; text-decoration:underline;">
+                    清空 Key / 切回纯本地词库
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="./static/js/game_data.js"></script>
+<script src="./static/js/client_engine.js"></script>
+<script src="./static/js/app.js"></script>
 </body>
 </html>
